@@ -13,6 +13,11 @@ class T2Vlayer(nn.Module):
         self.fre=nn.Parameter(torch.randn(1,output_dim-1),requires_grad=True)
         self.phi=nn.Parameter(torch.randn(1,output_dim-1),requires_grad=True)
 
+        nn.init.xavier_uniform_(self.w)
+        nn.init.xavier_uniform_(self.p)
+        nn.init.xavier_uniform_(self.fre)
+        nn.init.xavier_uniform_(self.phi)
+
     def forward(self,x):
         '''
         x为（batch,1)
@@ -26,9 +31,3 @@ class T2Vlayer(nn.Module):
     def activate_sin_func(self,x):
         return torch.sin(x)
 
-bsize=5
-a=torch.randn(bsize,1)
-print("a=",a)
-t2v=T2Vlayer(3)
-vector=t2v(a)
-print(vector)

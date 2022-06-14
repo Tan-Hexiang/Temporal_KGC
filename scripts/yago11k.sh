@@ -1,0 +1,1 @@
+python main.py --dataset=data/yago11k --run=yago11k --batch_size=16 --granularity_dim 3

@@ -1,105 +1,25 @@
-from html import entities
 import torch
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-import numpy as np
-from scripts import shredFacts
-'''
-此类完成数据的读取
-'''
-class myDataset:
-    def __init__(self,datapath,dataname,granularity_dim,valid_ratio,test_ratio) -> None:
-        '''
-        dataname= wiki 或 yoga
-        '''
-        super().__init__()
-        # 读取时间五元组
-        self.valid_ratio=valid_ratio
-        self.test_ratio=test_ratio
-        self.name=dataname
-        self.granularity_dim=granularity_dim  
-        path=datapath+dataname+'/temporal'
-        self.data=self.readtemporal(path,self.granularity_dim)
-        # 全局变量，记录当前batch的指针位置
-        self.start_batch=0
-        # 读取实体和关系对照表
-        self.entities,self.entity_ids=self.readentities(datapath+dataname+'/')
-        self.relations,self.relation_ids=self.readrelations(datapath+dataname+'/')
+from torch.utils import data
+from copy import deepcopy
 
-        self.all_facts_as_tuples = set([tuple(d) for d in self.data["train"] + self.data["valid"] + self.data["test"]])
+from graph import TemporalGraph
 
-    def nextPosBatch(self, batch_size):
-        if self.start_batch + batch_size > len(self.data['train']):
-            ret_facts = self.data['train'][self.start_batch : ]
-            self.start_batch = 0
-        else:
-            ret_facts = self.data['train'][self.start_batch : self.start_batch + batch_size]
-            self.start_batch += batch_size
-        return ret_facts
 
-    def addNegSamples(self, bp_facts, neg_ratio):
-        '''
-        随机生成(s,r,?,t)和(?,r,o,t)的负样本
-        input:
-            bp_facts: shape(params.bsize, 元组长度),每行为一个（s,r,o,t)的多元组，其中t可以为多粒度
-            neg_ratio: 每个正样本对应的负样本数量
-        output:
-            facts1: (?,r,o,t)的负样本,shape=( bsize*(1+neg_ratio), 元组长度 ), bsize组数据,每组一个正样本，neg_ratio个负样本
-            facts2: (s,r,?,t)的负样本，同上
-            输出为facts1和facts2按行堆叠的结果
-        '''
-        pos_neg_group_size = 1 + neg_ratio
-        facts1 = np.repeat(np.copy(bp_facts), pos_neg_group_size, axis=0)
-        facts2 = np.copy(facts1)
-        rand_nums1 = np.random.randint(low=0, high=self.numEnt()-1, size=facts1.shape[0])
-        rand_nums2 = np.random.randint(low=0, high=self.numEnt()-1, size=facts2.shape[0])
-        # 随机从entity id list中取一个id
-        for i in range(facts1.shape[0]):
-            rand_nums1[i]=self.entity_ids[rand_nums1[i]]
-            rand_nums2[i]=self.entity_ids[rand_nums2[i]]
-        # 每组第一个为正样本
-        for i in range(facts1.shape[0] // pos_neg_group_size):
-            rand_nums1[i*pos_neg_group_size] = facts1[i*pos_neg_group_size,0]
-            rand_nums2[i*pos_neg_group_size] = facts2[i*pos_neg_group_size,2]
-        # 随机改变?位置的实体id
-        facts1[:,0] = rand_nums1
-        facts2[:,2] = rand_nums2
-        return np.concatenate((facts1, facts2), axis=0)
+class Example(object):
+    """Defines each triple in TKG"""
+    def __init__(self, triple, granularity_dim, entity_vocab, relation_vocab, time_vocab, example_idx):
+        self.head_idx = entity_vocab(triple[0])
+        self.relation_idx = relation_vocab(triple[1])
+        self.tail_idx = entity_vocab(triple[2])
+        # time id
+        self.start_time_id = time_vocab(triple[3])
+        self.end_time_id = time_vocab(triple[4])
+        # time list
+        self.start_time_list=self.converttime(triple[3],granularity_dim)
+        self.end_time_list=self.converttime(triple[4],granularity_dim)
+        self.example_idx = example_idx
 
-    def nextBatch(self, batch_size, neg_ratio=1):
-        bp_facts = self.nextPosBatch(batch_size)
-        batch = shredFacts(self.addNegSamples(bp_facts, neg_ratio),self.granularity_dim)
-        return batch
-
-    def wasLastBatch(self):
-        return (self.start_batch == 0)
-
-    def readtemporal(self, filepath, granularity_dim) ->list:
-        '''
-        filepath: 数据完整路径
-        output: 五元组[s,r,t,start_time,end_time]的list,
-                其中start_time和end_time为granularity_dim维,缺失的粒度用0补充
-
-        '''
-        with open(filepath,'r') as f:
-            data=f.readlines()
-
-        result=[]
-        for line in data:
-            elements=line.strip().split('\t')
-
-            s=int(elements[0])
-            r=int(elements[1])
-            t=int(elements[2])
-            start_time=self.converttime(elements[3],granularity_dim) 
-            end_time=self.converttime(elements[4],granularity_dim)
-            triple=[s,r,t]
-            result.append(np.concatenate((triple,start_time,end_time),axis=0))
-
-        data_dic=self.split_valid_and_test(result)
-        return data_dic
-
-     
+        self.graph = None
 
     def converttime(self,timestr,granularity_dim):
         '''
@@ -111,64 +31,75 @@ class myDataset:
         # None值处理待考虑：暂时使用0值代替
         for i in range(granularity_dim):
             timelist.append(0)
-        if timestr=='None':
+        if timestr=='None' or timestr=='none':
             return timelist
-
-        time=timestr.split('_')
+        time=timestr.strip('\n').split('_')
         for i,value in enumerate(time):
-            timelist[i]=int(value)
+            if value == '##':
+                timelist[i]=0
+            else:
+                timelist[i]=int(value)
         return timelist
-       
 
-        
-    def readrelations(self,filepath):
-        relations={}
-        relation_ids=[]
-        path=filepath+'relations.dict'
-        with open(path,'r') as f:
-            data=f.readlines()
-        for line in data:
-            line=line.split('\t')
-            rid=line[0]
-            name=line[1]
-            relations[rid]=name
-            relation_ids.append(rid)       
-        return relations, relation_ids
+class TKGDataset(data.Dataset):
+    """Temporal KG Dataset Class"""
+    def __init__(self, example_list, kg, device):
+        self.example_list = example_list
+        self.kg = kg
+        self.device = device
 
-    def readentities(self,filepath):
-        entities={}
-        entity_ids=[]
-        path=filepath+'entities.dict'
-        with open(path,'r') as f:
-            data=f.readlines()
-        for line in data:
-            line=line.split('\t')
-            rid=line[0]
-            name=line[1]
-            entities[rid]=name
-            entity_ids.append(rid)       
-        return entities, entity_ids
+    def __iter__(self):
+        return iter(self.example_list)
 
-    def numEnt(self):
-    
-        return len(self.entity_ids)
+    def __getitem__(self, idx):
+        example = self.example_list[idx]
+        return example
 
-    def numRel(self):
-    
-        return len(self.relation_ids)
+    def __len__(self):
+        return len(self.example_list)
 
-    def split_valid_and_test(self,data):
-        '''
-        split train, valid and test dataset with a fixed ratio
-        '''
-        result={}
-        
-        length=len(data)
-        point1=int(self.test_ratio*length)
-        point2=int((self.test_ratio+self.valid_ratio)*length)
+    def collate(self, batched_examples):
+        batch_heads, batch_relations, batch_tails, batch_start_times_id, batch_end_times_id, batch_start_times_list,batch_end_times_list, batch_graph, batch_ex_indices = [], [], [], [], [], [], [], [], []
+        for example in batched_examples:
+            batch_heads.append(example.head_idx)
+            batch_relations.append(example.relation_idx)
+            batch_tails.append(example.tail_idx)
 
-        result['test']=data[:point1]
-        result['valid']=data[point1:point2]
-        result['train']=data[point2:]
-        return result
+            batch_start_times_list.append(example.start_time_list)
+            batch_end_times_list.append(example.end_time_list)
+            batch_start_times_id.append(example.start_time_id)
+            batch_end_times_id.append(example.end_time_id)
 
+            batch_ex_indices.append(example.example_idx)
+        # time tensor shape=([bsize,granularity_dim])
+        return {
+            "head": torch.tensor(batch_heads),
+            "relation": torch.tensor(batch_relations),
+            "tail": torch.tensor(batch_tails),
+
+            "start_time_id": torch.tensor(batch_start_times_id),
+            "end_time_id": torch.tensor(batch_end_times_id),
+            "start_time_list": torch.tensor(batch_start_times_list),
+            "end_time_list": torch.tensor(batch_end_times_list),
+            
+            "example_idx": torch.tensor(batch_ex_indices),
+            "graph": deepcopy(self.kg.graph)
+        }
+
+
+def get_datasets(filenames, args):
+    '''每个file输出对应的dataset'''
+    KG = TemporalGraph(filenames[0], args)
+    datasets = []
+
+    for fname in filenames:
+        triples = open(fname, 'r').read().lower().splitlines()
+        triples = list(map(lambda x: x.split("\t"), triples))
+
+        example_list = []
+        for i, triple in enumerate(triples):
+            example_list.append(Example(triple, args.granularity_dim, KG.entity_vocab, KG.relation_vocab, KG.time_vocab, i))
+
+        datasets.append(TKGDataset(example_list, KG, args.device))
+
+    return datasets
