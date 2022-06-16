@@ -13,8 +13,6 @@ class T2Vlayer(nn.Module):
         self.fre=nn.Parameter(torch.randn(1,output_dim-1),requires_grad=True)
         self.phi=nn.Parameter(torch.randn(1,output_dim-1),requires_grad=True)
 
-        nn.init.xavier_uniform_(self.w)
-        nn.init.xavier_uniform_(self.p)
         nn.init.xavier_uniform_(self.fre)
         nn.init.xavier_uniform_(self.phi)
 

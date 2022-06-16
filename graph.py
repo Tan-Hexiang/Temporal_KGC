@@ -58,14 +58,14 @@ class TemporalGraph:
         timelist=[]
         # None值处理待考虑：暂时使用0值代替
         for i in range(granularity_dim):
-            timelist.append(0)
+            timelist.append(1e-5)
         if timestr=='None' or timestr=='none':
             return timelist
         time=timestr.split('_')
         
         for i,value in enumerate(time):
             if value == '##':
-                timelist[i]=0
+                timelist[i]=1e-5
             else:
-                timelist[i]=int(value)
+                timelist[i]=float(value)
         return timelist

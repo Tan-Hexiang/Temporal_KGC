@@ -1,1 +1,1 @@
-python main.py --dataset=data/yago11k --run=yago11k --batch_size=16 --granularity_dim 3
+python main.py --dataset=data/yago11k --run=yago11k --batch_size=16 --granularity_dim 3 --lr 5e-3 --time_dim 50 5 10 --node_dim 50

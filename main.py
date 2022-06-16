@@ -39,10 +39,10 @@ def train_one_epoch(model, dataloader, optimizer, args, epoch, global_count, wri
 
             attention_history = model(batch)
             predicted_prob = attention_history[-1].transpose(0, 1)
-
+            # print("predicted_prob: ",predicted_prob)
             # Compute loss
             loss = F.nll_loss(torch.log(predicted_prob + 1e-12), batch["tail"])
-            print(torch.log(predicted_prob + 1e-12))
+            # print("loss: ",loss)
 
             if args.dataset == 'data/wikidata11k_aug':
                 if epoch_count % 16 == 0:

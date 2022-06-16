@@ -22,12 +22,17 @@ class TGAP(nn.Module):
         self.edge_embed = nn.Embedding(len(args.relation_vocab), args.node_dim, padding_idx=0)
         # self.tau_embed = nn.Embedding(len(args.time_vocab), args.node_dim, padding_idx=0)
 
-        # time2vec layer
-        self.start_t2v=nn.ModuleList([T2Vlayer(args.node_dim) for i in range(args.granularity_dim)])
-        self.end_t2v=nn.ModuleList([T2Vlayer(args.node_dim) for i in range(args.granularity_dim)])
-
+        # time2vec layer: 每个粒度的向量维度不同
+        # self.start_t2v=nn.ModuleList([T2Vlayer(args.node_dim) for i in range(args.granularity_dim)])
+        # self.end_t2v=nn.ModuleList([T2Vlayer(args.node_dim) for i in range(args.granularity_dim)])
+        self.start_t2v=nn.ModuleList([])
+        self.end_t2v=nn.ModuleList([])
+        for i in range(args.granularity_dim):
+            self.start_t2v.append(T2Vlayer(args.time_dim[i]))
+            self.end_t2v.append(T2Vlayer(args.time_dim[i]))
+    
         # linear layers of time
-        self.time_linear=nn.Linear(args.granularity_dim*2*args.node_dim, args.node_dim)
+        self.time_linear=nn.Linear(2*args.all_time_dim, args.node_dim)
         self.time_score=nn.Sequential(
             nn.Linear(args.node_dim*2,args.node_dim*4),
             nn.ReLU(),
@@ -147,7 +152,7 @@ class TGAP(nn.Module):
         graph.ndata['a'] = torch.zeros((graph.number_of_nodes(), batch_size, self.num_out_heads)) \
             .to(self.args.device)   # 初始化 node attention
         graph.ndata['a'][tuple(head_indices)] = 1   # 初始化 node attention
-
+        
         # Prepare query vector for each example
         query = torch.cat([self.node_embed(batch['head']), self.edge_embed(batch['relation'])], dim=-1) # h_query 论文中公式（5）batch_size*embedding_dim * 2
         query = self.W_c(query) # 论文中公式（6）
@@ -224,6 +229,8 @@ class TGAP(nn.Module):
                                                                   sub_g.ndata['g_n'])
 
             attn_history.append(graph.ndata['a'].mean(2))
+            # print("a:",graph.ndata['a'].mean(2))
+
 
         return attn_history
 
@@ -313,12 +320,12 @@ class TGAP(nn.Module):
         for i in range(self.args.granularity_dim):
             start_gra.append(self.start_t2v[i](start_time[:,i].view(-1,1)))
             end_gra.append(self.end_t2v[i](end_time[:,i].view(-1,1)))
-        start_time=torch.stack(start_gra,dim=1).view(batch_size,-1)
-        end_time=torch.stack(end_gra,dim=1).view(batch_size,-1)
+        start_time=torch.cat(start_gra,dim=1)
+        end_time=torch.cat(end_gra,dim=1)
         # print("start_time shape: ",start_time.shape)
         # print("end_time shape: ",end_time.shape)
         # print("time shape: ",torch.cat((start_time, end_time),dim=-1).shape)
-
+        # exit(0)
         time = torch.cat((start_time, end_time),dim=-1)
         time = self.time_linear(time)
         return time

@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 import argparse
 import torch
+import numpy as np
 
 
 def set_properties_to_args(args, entity_vocab, relation_vocab, time_vocab):
@@ -28,6 +29,7 @@ def get_args():
     args.add_argument('--grad_clip', default=3, type=int, help="Gradient clip size.")
     args.add_argument('--patience', default=3, type=int, help="ReduceLROnPlateau patience.")
 
+    args.add_argument("--time_dim",default=[10], nargs='+', type=int,help="The dim of time2vec of each granularity. you must pass granularity_dim args.")
     args.add_argument('--node_dim', default=100, type=int, help="Node embedding size.")
     args.add_argument('--gamma', default=0.5, type=float)
     args.add_argument('--num_in_heads', default=5, type=int, help="Number of heads for PGNN, SGNN")
@@ -48,5 +50,6 @@ def get_args():
     args.ckpt_dir = os.path.join(args.results_dir, 'checkpoint', args.run)
 
     args.device = torch.device("cuda" if args.device == "cuda" and torch.cuda.is_available() else "cpu")
-
+    # 一个时间点各个粒度时间向量的维度和，用于time2vec向量初始化
+    args.all_time_dim=np.sum(args.time_dim)
     return args
